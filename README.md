@@ -184,10 +184,17 @@ VERSIONS            pinned upstream revisions
 
 - **One process means one crash.** A fault in the island takes Caelestia down
   with it. `scripts/uninstall.sh` gets you back to stock in one command.
-- **This configuration keeps every module both shells ship.** Notifications and
-  OSD render in both the notch *and* Caelestia's drawers. That is a choice, not
-  a bug — [docs/KEYBINDS.md](docs/KEYBINDS.md) lists what doubles and how to
-  turn either side off.
+- **The notch owns notifications and OSD, and that costs real features.** The
+  island observes notifications over D-Bus rather than serving them, so Do Not
+  Disturb is ignored, app icons and action buttons are dropped, and urgency
+  styling is lost. Caelestia's microphone OSD has no equivalent at all.
+  [docs/KEYBINDS.md](docs/KEYBINDS.md) has the full list and how to hand
+  notifications back.
+- **Auto-hide is turned off.** An OSD event does not wake the island from
+  auto-hide, so with Caelestia's OSD disabled a hidden island means volume and
+  brightness changes give no feedback at all. Keeping the notch always present
+  fixes that, and suits a notch — but its exclusive zone then permanently
+  shifts windows down by `islandExclusiveZone` pixels.
 - **The theme bridge is a patch, not an upstream feature.** It needs rebasing
   when Tide edits `StyleTokensBackend`. `make sync` tells you when.
 - **Fedora-shaped.** `scripts/install-deps.sh` is `dnf`. Everything else is

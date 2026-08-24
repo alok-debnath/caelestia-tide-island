@@ -1,0 +1,137 @@
+diff --git a/backend/SysBackend.cpp b/backend/SysBackend.cpp
+index 296d742..7c0567a 100644
+--- a/backend/SysBackend.cpp
++++ b/backend/SysBackend.cpp
+@@ -14,6 +14,9 @@
+ #include <QStandardPaths>
+ #include <libudev.h>
+ 
++#include <fcntl.h>
++#include <unistd.h>
++
+ namespace {
+ constexpr int kCommandTimeoutMs = 500;
+ constexpr int kAudioEventDebounceMs = 80;
+@@ -52,6 +55,7 @@ SysBackend::SysBackend(QObject *parent)
+ SysBackend::~SysBackend() {
+     stopLyricsBackend();
+     if (m_batteryMonitor) udev_monitor_unref(m_batteryMonitor);
++    if (m_backlightMonitor) udev_monitor_unref(m_backlightMonitor);
+     if (m_udev) udev_unref(m_udev);
+ }
+ 
+@@ -424,9 +428,20 @@ void SysBackend::setupBrightness() {
+     QFile bFile(brightnessPath);
+     if (!bFile.exists()) return;
+ 
++    // QFileSystemWatcher is inotify-based and sysfs attribute files do not
++    // deliver inotify events, so brightness changes were silently missed.
++    // POLLPRI (sysfs_notify) does not fire for this attribute either -- checked
++    // against intel_backlight, where a brightnessctl write produces neither.
++    //
++    // What the kernel does emit is a udev "change" event on the backlight
++    // subsystem, so the backlight is watched the same way the battery already
++    // is. The file watcher is kept as a harmless secondary source.
+     m_brightnessWatcher = new QFileSystemWatcher(this);
+     m_brightnessWatcher->addPath(brightnessPath);
+     connect(m_brightnessWatcher, &QFileSystemWatcher::fileChanged, this, &SysBackend::updateBrightness);
++
++    setupBacklightMonitor();
++
+     updateBrightness();
+ }
+ 
+@@ -455,6 +470,57 @@ void SysBackend::detectBacklightPath() {
+     }
+ }
+ 
++// Watch the backlight subsystem for udev change events. Reuses the udev
++// context created for power_supply monitoring, creating one if battery setup
++// never got that far.
++void SysBackend::setupBacklightMonitor() {
++    if (!m_udev) {
++        m_udev = udev_new();
++        if (!m_udev) {
++            qWarning() << "[SysBackend] Failed to create udev context for backlight monitoring";
++            return;
++        }
++    }
++
++    m_backlightMonitor = udev_monitor_new_from_netlink(m_udev, "udev");
++    if (!m_backlightMonitor) {
++        qWarning() << "[SysBackend] Failed to create udev monitor for backlight monitoring";
++        return;
++    }
++
++    if (udev_monitor_filter_add_match_subsystem_devtype(m_backlightMonitor, "backlight", nullptr) < 0 ||
++        udev_monitor_enable_receiving(m_backlightMonitor) < 0) {
++        qWarning() << "[SysBackend] Failed to enable udev monitor for backlight monitoring";
++        udev_monitor_unref(m_backlightMonitor);
++        m_backlightMonitor = nullptr;
++        return;
++    }
++
++    const int monitorFd = udev_monitor_get_fd(m_backlightMonitor);
++    if (monitorFd < 0) {
++        qWarning() << "[SysBackend] Failed to get udev monitor fd for backlight monitoring";
++        udev_monitor_unref(m_backlightMonitor);
++        m_backlightMonitor = nullptr;
++        return;
++    }
++
++    m_backlightNotifier = new QSocketNotifier(monitorFd, QSocketNotifier::Read, this);
++    connect(m_backlightNotifier, &QSocketNotifier::activated, this, &SysBackend::handleBacklightMonitorEvent);
++}
++
++void SysBackend::handleBacklightMonitorEvent() {
++    if (!m_backlightMonitor) return;
++
++    bool shouldRefresh = false;
++    udev_device *device = nullptr;
++    while ((device = udev_monitor_receive_device(m_backlightMonitor)) != nullptr) {
++        shouldRefresh = true;
++        udev_device_unref(device);
++    }
++
++    if (shouldRefresh) updateBrightness();
++}
++
+ void SysBackend::updateBrightness() {
+     if (m_backlightPath.isEmpty()) return;
+ 
+diff --git a/backend/SysBackend.h b/backend/SysBackend.h
+index dc68fa5..f128781 100644
+--- a/backend/SysBackend.h
++++ b/backend/SysBackend.h
+@@ -53,6 +53,7 @@ private slots:
+     void handleVolumeQueryFinished(int exitCode, QProcess::ExitStatus exitStatus);
+     void handleDefaultSinkQueryFinished(int exitCode, QProcess::ExitStatus exitStatus);
+     void handleBatteryMonitorEvent();
++    void handleBacklightMonitorEvent();
+     void handleBatteryPropertiesChanged(const QString &interfaceName, const QVariantMap &changedProperties, const QStringList &invalidatedProperties);
+     void handleUpowerBatteryChanged();
+     void updateBrightness();
+@@ -70,6 +71,7 @@ private:
+     void setupBatteryUpower();
+     void setupAudio();
+     void setupBrightness();
++    void setupBacklightMonitor();
+     void setupLyrics();
+     void stopLyricsBackend();
+     void checkDefaultAudioDevice();
+@@ -89,6 +91,9 @@ private:
+     QProcess *m_volumeQueryProcess;
+     QProcess *m_defaultSinkQueryProcess;
+     QFileSystemWatcher *m_brightnessWatcher;
++    // sysfs attributes deliver neither inotify nor POLLPRI for the backlight,
++    // so brightness is driven by udev change events. See setupBrightness().
++    QSocketNotifier *m_backlightNotifier = nullptr;
+     QSocketNotifier *m_batteryNotifier;
+     QTimer *m_audioDebounceTimer;
+     QTimer *m_volumeQueryTimeoutTimer;
+@@ -113,4 +118,5 @@ private:
+ 
+     struct udev *m_udev;
+     struct udev_monitor *m_batteryMonitor;
++    struct udev_monitor *m_backlightMonitor = nullptr;
+ };

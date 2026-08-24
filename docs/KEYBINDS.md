@@ -122,6 +122,27 @@ hl.bind("SUPER + ALT + Tab", island("overview", "toggle"))
 `hypr-user.lua`. Rebinding a key does not replace an existing bind — call
 `hl.unbind(key)` first if you are taking one over.
 
+## What the notch does not do
+
+Routing notifications and OSD to the notch is not a free swap. Measured against
+what Caelestia's own panels did, these are the gaps:
+
+| Gap | Detail |
+| --- | --- |
+| **Do Not Disturb is ignored** | The island learns about notifications by snooping the session bus with `dbus-monitor`, rather than by being the notification server. Caelestia is still the server and still honours `notifs toggleDnd` for its own panel and history, but the notch never sees the DND state and pops regardless. |
+| **No app icons** | Every notification shows a generic bell. The snooped `Notify` call carries an icon, but the island does not render it. |
+| **No actions** | Notifications with buttons show none, and `notifs.actionOnClick` has nothing to act on. The action still exists on Caelestia's side, reachable from the sidebar history. |
+| **No urgency styling** | A `critical` notification looks identical to a low-priority one. |
+| **Caelestia's expire settings do not apply** | `notifs.expire`, `defaultExpireTimeout` and `fullscreenExpireTimeout` govern Caelestia's panel; the notch uses its own timing. |
+| **No microphone OSD** | Caelestia had one behind `osd.enableMicrophone`. Tide has no microphone support at all — no source volume, no mute state — so this is gone outright rather than merely unrouted. |
+
+The first four all follow from the same root cause: the island observes
+notifications instead of serving them. Fixing any of them properly means making
+Tide a real notification client, which is upstream work, not integration work.
+
+If these matter more than having notifications in the notch, hand them back —
+see below.
+
 ## Turning the routing around
 
 To give notifications and OSD back to Caelestia:

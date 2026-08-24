@@ -10,6 +10,17 @@
 #       The notch has to sit flush against the top border for the blob to fuse
 #       with it. Any margin leaves the island floating as a separate pill.
 #
+#   ~/.config/tide-island/userconfig.json   islandAutoHideEnabled = false
+#       The island's OSD only renders while the island is on screen, and an OSD
+#       event does not wake it from auto-hide. With Caelestia's own OSD off,
+#       auto-hide means volume and brightness changes give no feedback at all.
+#       A notch is also not something that should come and go.
+#
+#       Side effect worth knowing: with auto-hide off the island's exclusive
+#       zone becomes permanent, so windows are laid out below it. That is
+#       correct for a notch, but it does shift the workspace down by
+#       islandExclusiveZone pixels (45 by default).
+#
 # Both files are edited in place, key by key: anything else you have set in
 # them is preserved, and re-running changes nothing.
 
@@ -63,5 +74,6 @@ apply_json_key "$CAELESTIA_SHELL_JSON" "osd.enabled" "false"
 
 log "configuring $TIDE_USER_CONFIG"
 apply_json_key "$TIDE_USER_CONFIG" "islandTopMargin" "0"
+apply_json_key "$TIDE_USER_CONFIG" "islandAutoHideEnabled" "false"
 
 log "done"
