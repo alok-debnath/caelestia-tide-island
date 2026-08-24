@@ -28,6 +28,10 @@ This repo fixes both:
 
 - **One process.** The island is mounted inside Caelestia's shell root.
   `caelestia shell -d` starts everything; `SUPER + R` reloads everything.
+- **A real notch, not a pill.** The island is drawn by Caelestia's own blob
+  renderer, so it grows out of the top border as one continuous surface with
+  concave joins — square top corners, rounded bottom — instead of floating
+  below it. Notifications and volume/brightness animate in it.
 - **One colour system.** A patch to Tide's C++ makes `StyleTokens` read
   `~/.local/state/caelestia/scheme.json` and repaint live when the wallpaper
   changes.
@@ -52,6 +56,7 @@ make install
 | `make deps` | Fedora build + runtime packages |
 | `make build` | clone Tide at the pinned revision, apply `patches/tide/`, build, `ctest`, install to `/usr` |
 | `make overlay` | create the Caelestia config fork at `~/.config/quickshell/caelestia` and layer the island in |
+| `make config` | apply the two settings that live in user config files rather than QML |
 | `make restart` | restart the shell |
 
 Nothing in your Hyprland config is touched, and Tide's `tide-island.service` is
@@ -163,11 +168,12 @@ Quickshell falls back to `/etc/xdg/quickshell/caelestia` immediately.
 ## Layout
 
 ```
-patches/tide/       patches against Tide Island's C++ (the theme bridge + its tests)
+patches/tide/       patches against Tide Island (theme bridge + tests, blob surface)
 patches/tide-shell/ turns Tide's shell.qml into the overlay module (generator)
 patches/caelestia/  patches applied to the Caelestia config fork
                     0001 mounts the island in shell.qml
                     0002 makes the dashboard a left-edge drawer
+                    0003 draws the notch in the blob group, routes notifications
 overlay/caelestia/  files copied verbatim into the config fork
 scripts/            build, overlay, sync, restart, uninstall
 docs/               architecture, theming, upstream sync, keybinds

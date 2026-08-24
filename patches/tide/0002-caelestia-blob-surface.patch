@@ -1,0 +1,45 @@
+diff --git a/DynamicIslandWindow.qml b/DynamicIslandWindow.qml
+index e77e28c..5178d71 100644
+--- a/DynamicIslandWindow.qml
++++ b/DynamicIslandWindow.qml
+@@ -12,6 +12,17 @@ import "qml/workspace"
+ PanelWindow {
+     id: root
+     property var shellRootController: null
++
++    // Caelestia integration. With blobSurface set, the capsule paints no
++    // background of its own: Caelestia's blob renderer draws the notch in its
++    // own window instead, fused into the screen border, and only the island's
++    // content is drawn here. caelestiaCapsule is the geometry to mirror --
++    // islandContainer fills the window, so the capsule's x/y/width/height are
++    // already window-relative, and the window itself is placed at the border
++    // origin by Caelestia's exclusion zones.
++    property bool caelestiaBlobSurface: false
++    readonly property Item caelestiaCapsule: mainCapsule
++
+     property string overviewPhase: "closed"
+     property bool overviewPreloading: false
+     readonly property bool overviewPreparing: overviewPhase === "preparing"
+@@ -1953,9 +1964,19 @@ PanelWindow {
+             readonly property real sideSwipePreviewWidth: mainCapsule.sideSwipeWidthForProgress(
+                 islandContainer.swipeTransitionProgress
+             )
+-            color: root.overviewContentVisible
+-                ? root.overviewCapsuleColor
+-                : (notificationHistorySurface ? "#080808" : Qt.rgba(0, 0, 0, userConfig.islandBackgroundOpacity / 100.0))
++            // The plain island body follows the themed surface rather than a
++            // hardcoded black, and drops out entirely when Caelestia is drawing
++            // the notch. The overview and notification-history surfaces keep
++            // painting themselves: both are full-bleed panels rather than the
++            // notch shape, so the blob does not stand in for them.
++            readonly property color themedSurface: Qt.rgba(StyleTokens.panel.r, StyleTokens.panel.g, StyleTokens.panel.b, userConfig.islandBackgroundOpacity / 100.0)
++            color: {
++                if (root.overviewContentVisible)
++                    return root.overviewCapsuleColor;
++                if (notificationHistorySurface)
++                    return StyleTokens.module;
++                return root.caelestiaBlobSurface ? StyleTokens.transparent : themedSurface;
++            }
+             y: userConfig.islandTopMargin
+                 - (1 - root.autoHideProgress) * (targetHeight + userConfig.islandTopMargin + 8)
+             x: parent ? parent.width * userConfig.islandPositionX / 100 - width / 2 : 0

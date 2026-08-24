@@ -10,25 +10,28 @@ config.
 
 ## What exists twice
 
-| Feature | Caelestia | Island |
-| --- | --- | --- |
-| Notification popups | drawer, top-right | notch |
-| Notification history | sidebar | `tide toggleNotificationCenter` |
-| Volume / brightness OSD | drawer | notch |
-| App launcher | `SUPER` (tap) | `tide toggleApplicationLauncher` |
-| Control centre / quick settings | dashboard (left edge) | `tide toggleControlCenter` |
-| Wallpaper picker | `caelestia wallpaper` | `tide toggleWallpaperPicker` |
-| Workspace overview | drawer | `overview toggle` |
-| Media controls | `mpris` IPC + media keys | notch player, `tide togglePlayer` |
-| Clock | bar | notch |
+The notch owns notifications and OSD; Caelestia keeps the rest.
 
-Only the Caelestia side is bound to keys today. The island side is reachable
-through IPC and unbound, so there are **no key conflicts** in the default
-state — you get duplicate *UI surfaces*, not duplicate *shortcuts*.
+| Feature | Rendered by |
+| --- | --- |
+| Notification popups | **notch** — Caelestia's stack is collapsed |
+| Volume / brightness OSD | **notch** — `osd.enabled = false` in `shell.json` |
+| Notification history | both: Caelestia's sidebar, and `tide toggleNotificationCenter` |
+| App launcher | Caelestia (`SUPER`); the island's is unbound |
+| Control centre | Caelestia's dashboard; the island's is unbound |
+| Wallpaper picker | Caelestia; the island's is unbound |
+| Workspace overview | Caelestia; the island's is unbound |
+| Media controls | both: Caelestia's `mpris` IPC and media keys, and the notch player |
+| Clock | both: the bar and the notch |
 
-Both notification stacks are fed by the same D-Bus service, so a single
-notification renders in both places at once. That is the visible cost of this
-configuration. If it grates, [Turning one side off](#turning-one-side-off).
+Everything marked *unbound* is dormant — the island ships it, but nothing
+invokes it, because no keybind points at it. Tide has no per-module
+configuration to disable them with (`UserConfigBackend`'s only booleans are
+wallpaper and auto-hide related), so leaving them unbound is how they stay out
+of the way.
+
+Only the Caelestia side is bound to keys, so there are **no key conflicts** in
+the default state.
 
 ## Island IPC reference
 
@@ -119,28 +122,20 @@ hl.bind("SUPER + ALT + Tab", island("overview", "toggle"))
 `hypr-user.lua`. Rebinding a key does not replace an existing bind — call
 `hl.unbind(key)` first if you are taking one over.
 
-## Turning one side off
+## Turning the routing around
 
-Both are reversible, both are your call — the integration works either way.
-
-**Island side.** Its modules are configured through Tide's own config, which
-`tide-island-config-app` edits:
-
-```sh
-tide-island-config-app
-```
-
-**Caelestia side.** Its notification and OSD surfaces are QML, mounted from
-`modules/drawers/`. Edit them in the fork and commit on `main`:
+To give notifications and OSD back to Caelestia:
 
 ```sh
 cd ~/.config/quickshell/caelestia
-$EDITOR modules/drawers/Panels.qml     # drop the Notifications / Osd wrappers
-git commit -am "overlay: island owns notifications and OSD"
+$EDITOR modules/notifications/Wrapper.qml   # popupsEnabled: true
+git commit -am "overlay: caelestia owns notification popups"
 ```
 
-Because the fork is a git repo, that edit survives the next
-`caelestia-shell` update as a merge, and `git revert` puts it back.
+and set `osd.enabled` back to `true` in `~/.config/caelestia/shell.json`. You
+would then also want to suppress Tide's `NotificationLayer` and `OsdLayer`, or
+both sides render again. That direction needs a patch against the island's own
+window file, which this repo deliberately avoids vendoring.
 
 ## Dashboard is a left-edge drawer
 

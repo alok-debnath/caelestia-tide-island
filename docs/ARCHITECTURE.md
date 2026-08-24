@@ -166,6 +166,94 @@ Two things worth noting:
 `panelWidth` folds in `offsetScale`, so a closed dashboard is reachable only
 from the corner while an open one is held by its whole body.
 
+### The notch
+
+The island ships as a rounded pill floating a few pixels below the top edge —
+correct for a Dynamic Island on its own, foreign inside Caelestia, where every
+panel grows out of the screen border as one continuous surface.
+
+Caelestia renders its chrome as signed-distance-field blobs: a `BlobGroup`
+holds one `BlobInvertedRect` for the border plus a `BlobRect` per panel, and
+the group's `smoothing` melts overlapping shapes together with concave joins.
+That is what makes the dashboard and launcher look carved out of the border
+rather than stuck onto it.
+
+`patches/caelestia/0003` adds the island to that group:
+
+```qml
+BlobRect {
+    id: islandBg
+
+    readonly property var islandWindow: ShellState.componentsFor(root.screen)?.island ?? null
+    readonly property Item capsule: islandWindow?.caelestiaCapsule ?? null
+
+    group: blobGroup
+    visible: !!capsule && capsule.opacity > 0.01
+    x: (capsule?.x ?? 0) + bar.implicitWidth
+    y: (capsule?.y ?? 0) + root.borderThickness
+    implicitWidth: capsule?.width ?? 0
+    implicitHeight: capsule?.height ?? 0
+    radius: capsule?.radius ?? 0
+    topLeftRadius: 0
+    topRightRadius: 0
+}
+```
+
+`BlobRect` exposes per-corner radii, so squaring off `topLeftRadius` and
+`topRightRadius` is what turns a pill into a notch: it is flush with the border
+above and rounded only where it meets the desktop below.
+
+**This is the payoff of the single-process design.** The island lives in its own
+layer-shell window, and the blob is drawn in Caelestia's drawers window — two
+separate Wayland surfaces. Mirroring an animated geometry between them would be
+impossible across two processes; inside one QML engine it is a property binding.
+`radius` is bound to the capsule's own animated radius, so the island's morphs
+(clock to player to notification to control centre) carry through to the blob,
+and `BlobRect`'s spring physics smooth the rest.
+
+The coordinate mapping is a coincidence worth stating, because it is load-bearing:
+
+- the island's `PanelWindow` is `anchors { top; left; right }` with no margins,
+  so Caelestia's own exclusion zones place its origin at exactly
+  `(bar.implicitWidth, borderThickness)`;
+- `islandContainer` inside it is `anchors.fill: parent`, so `mainCapsule.x/y`
+  are already window-relative.
+
+Together those mean the capsule's coordinates land in the same space `PanelBg`
+already works in, and the `+ bar.implicitWidth` / `+ borderThickness` offsets
+above are the same ones every other panel uses. If either fact changes upstream,
+the notch will be offset and this is the first place to look.
+
+On the island side, `patches/tide/0002` adds two properties to
+`DynamicIslandWindow.qml`: `caelestiaCapsule`, exposing the capsule to mirror,
+and `caelestiaBlobSurface`, which makes the capsule paint nothing so only
+Caelestia's blob shows through. The same patch replaces the capsule's hardcoded
+`Qt.rgba(0, 0, 0, ...)` fill with `StyleTokens.panel` — upstream painted the
+island body black regardless of theme, which the colour bridge alone could not
+reach.
+
+Two settings cannot be patches, because they live in user config files rather
+than the QML trees. `scripts/apply-config.sh` applies them idempotently:
+
+| File | Key | Why |
+| --- | --- | --- |
+| `~/.config/caelestia/shell.json` | `osd.enabled = false` | volume and brightness render in the notch |
+| `~/.config/tide-island/userconfig.json` | `islandTopMargin = 0` | the notch must sit flush for the blob to fuse with the border |
+
+### Which shell owns notifications and OSD
+
+The notch does. `patches/caelestia/0003` collapses Caelestia's popup stack in
+`modules/notifications/Wrapper.qml` — the panel stays mounted, because `Panels`,
+`Regions`, `ContentWindow` and the sidebar all anchor against its geometry, but
+its `implicitHeight` is pinned to 0. Notification history in the sidebar is
+unaffected: it reads the `Notifs` service directly rather than through the panel.
+
+Tide has no per-module configuration — `UserConfigBackend`'s only booleans are
+wallpaper and auto-hide related — so this direction is the one that can be done
+without vendoring the island's window file. The reverse (Caelestia keeping
+notifications, the island suppressed) would need to disable Tide's
+`NotificationLayer` and `OsdLayer` in QML instead.
+
 ## Theming
 
 Upstream Tide hardcodes an Apple-dark palette in `StyleTokensBackend`, with all

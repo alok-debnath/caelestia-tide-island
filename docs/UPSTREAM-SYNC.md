@@ -27,10 +27,12 @@ make restart
 commits it as `caelestia-shell <version>`, tags `upstream/<version>`, then
 merges that into `main`.
 
-Five files can conflict, and only if upstream edited the same regions the
+Eight files can conflict, and only if upstream edited the same regions the
 overlay touches: `shell.qml`, `modules/drawers/Panels.qml`,
-`modules/drawers/Interactions.qml`, `modules/drawers/Regions.qml`, and
-`modules/dashboard/Wrapper.qml`. Resolve like any merge:
+`modules/drawers/Interactions.qml`, `modules/drawers/Regions.qml`,
+`modules/drawers/ContentWindow.qml`, `modules/dashboard/Wrapper.qml`,
+`modules/notifications/Wrapper.qml`, and `services/ShellState.qml`. Resolve
+like any merge:
 
 ```sh
 cd ~/.config/quickshell/caelestia
@@ -67,6 +69,14 @@ For the dashboard patch, what must survive is:
 
 If upstream ever adds its own dashboard-position option, drop
 `patches/caelestia/0002` and use theirs instead.
+
+For the notch patch, what must survive is the `islandBg` `BlobRect` in
+`ContentWindow.qml`, the `island` slot on `ShellState.Components`, and
+`popupsEnabled` in `modules/notifications/Wrapper.qml`. If the notch ends up
+offset from the border after an update, check two upstream facts the coordinate
+mapping depends on, both spelled out in [ARCHITECTURE.md](ARCHITECTURE.md): that
+the island window still has no margins of its own, and that `PanelBg` still
+offsets by `bar.implicitWidth` and `borderThickness`.
 
 ### Rolling back a bad Caelestia update
 
@@ -116,6 +126,19 @@ What to preserve while resolving:
 - `tests/style_tokens_backend_tests.cpp` and its `CMakeLists.txt` block survive
 
 Then `make build`, which runs `ctest`.
+
+### When `patches/tide/0002` stops applying
+
+This is the patch exposing `caelestiaCapsule` and `caelestiaBlobSurface` on
+`DynamicIslandWindow.qml`, and swapping the capsule's hardcoded black fill for
+`StyleTokens.panel`. It touches two small regions, so it usually survives.
+
+If upstream restructures the capsule, what must survive is: the two root
+properties, the capsule paying attention to `caelestiaBlobSurface` by painting
+`StyleTokens.transparent`, and `caelestiaCapsule` still pointing at the item
+whose `x`/`y` are window-relative. If upstream ever nests the capsule below
+`islandContainer`, the blob will be offset and the mirror needs the extra
+parent offsets added in `ContentWindow.qml`.
 
 ### When `patches/tide-shell/0001` stops applying
 

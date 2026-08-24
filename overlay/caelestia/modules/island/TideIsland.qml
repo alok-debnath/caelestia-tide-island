@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.services
 import IslandBackend
 // DynamicIslandWindow and its qml/ subtree are loaded from the Tide Island
 // install prefix rather than vendored into this repo. Keeping the 126 KB
@@ -284,10 +285,23 @@ Scope {
         model: Quickshell.screens
 
         Tide.DynamicIslandWindow {
+            id: islandWindow
+
             required property var modelData
 
             screen: modelData
             shellRootController: shellRoot
+
+            // Caelestia draws the notch: the capsule paints no background of
+            // its own, and ContentWindow.qml mirrors its geometry into the
+            // shell's blob group so it fuses with the screen border.
+            caelestiaBlobSurface: true
+
+            ShellState.ComponentRef {
+                screen: islandWindow.modelData
+                slot: "island"
+                component: islandWindow
+            }
         }
     }
 }

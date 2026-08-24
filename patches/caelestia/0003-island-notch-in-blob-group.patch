@@ -1,0 +1,78 @@
+diff --git a/modules/drawers/ContentWindow.qml b/modules/drawers/ContentWindow.qml
+index 212682f..cc84909 100644
+--- a/modules/drawers/ContentWindow.qml
++++ b/modules/drawers/ContentWindow.qml
+@@ -222,6 +222,35 @@ StyledWindow {
+             panel: panels.notifications
+         }
+ 
++        // Tide Island's notch. Drawn here rather than by the island itself so
++        // it is part of the same blob group as every other panel and fuses into
++        // the top border with the same concave joins.
++        //
++        // The island lives in its own layer-shell window, but that window is
++        // placed at the border origin by Caelestia's exclusion zones, and its
++        // root container fills it -- so the capsule's own x/y are already in the
++        // same space PanelBg works in, and the offsets below match PanelBg's.
++        BlobRect {
++            id: islandBg
++
++            readonly property var islandWindow: ShellState.componentsFor(root.screen)?.island ?? null
++            readonly property Item capsule: islandWindow?.caelestiaCapsule ?? null
++
++            group: blobGroup
++            visible: !!capsule && capsule.opacity > 0.01
++            x: (capsule?.x ?? 0) + bar.implicitWidth
++            y: (capsule?.y ?? 0) + root.borderThickness
++            implicitWidth: capsule?.width ?? 0
++            implicitHeight: capsule?.height ?? 0
++            // Follow the capsule's own animated radius so the island's morphs
++            // still read, but square off the top: this is a notch cut out of the
++            // border, not a pill floating below it.
++            radius: capsule?.radius ?? 0
++            topLeftRadius: 0
++            topRightRadius: 0
++            deformScale: (0.1 * Config.appearance.deformScale) / 10000
++        }
++
+         PanelBg {
+             id: utilsBg
+ 
+diff --git a/modules/notifications/Wrapper.qml b/modules/notifications/Wrapper.qml
+index c048e76..bdee88c 100644
+--- a/modules/notifications/Wrapper.qml
++++ b/modules/notifications/Wrapper.qml
+@@ -10,10 +10,17 @@ Item {
+     property alias sessionPanel: content.sessionPanel
+     property alias utilitiesPanel: content.utilitiesPanel
+ 
+-    visible: height > 0
++    // The island renders notification popups, so this stack stays collapsed.
++    // Notification history in the sidebar is unaffected: it reads the Notifs
++    // service directly rather than going through this panel. The panel itself
++    // stays mounted because Panels, Regions, ContentWindow and the sidebar all
++    // anchor against its geometry.
++    readonly property bool popupsEnabled: false
++
++    visible: popupsEnabled && height > 0
+     anchors.topMargin: -5
+     implicitWidth: Math.max(sidebarPanel.width, content.implicitWidth)
+-    implicitHeight: content.implicitHeight
++    implicitHeight: popupsEnabled ? content.implicitHeight : 0
+ 
+     Content {
+         id: content
+diff --git a/services/ShellState.qml b/services/ShellState.qml
+index 84672fe..ba1e13a 100644
+--- a/services/ShellState.qml
++++ b/services/ShellState.qml
+@@ -67,6 +67,9 @@ Singleton {
+         property var interactionWrapper
+         property var bar
+         property var panels
++        // Tide Island's window for this screen, registered by
++        // modules/island/TideIsland.qml so ContentWindow can draw its notch.
++        property var island
+ 
+         function find(name: string, rootItem: Item): var {
+             return CUtils.findChild(rootItem ?? rootWindow?.contentItem, name);

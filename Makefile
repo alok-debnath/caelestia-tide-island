@@ -1,9 +1,10 @@
-.PHONY: help deps build overlay install restart sync uninstall test
+.PHONY: help deps build overlay config install restart sync uninstall test
 
 help:
 	@echo "make deps      install Fedora build and runtime packages"
 	@echo "make build     build Tide Island with the patches and install it"
 	@echo "make overlay   create or refresh the Caelestia config fork"
+	@echo "make config    apply the two settings that live in user config files"
 	@echo "make install   deps + build + overlay + restart"
 	@echo "make restart   restart the Caelestia shell"
 	@echo "make sync      move to the latest upstream Tide Island revision"
@@ -19,10 +20,13 @@ build:
 overlay:
 	@scripts/apply-overlay.sh
 
+config:
+	@scripts/apply-config.sh
+
 restart:
 	@scripts/restart-shell.sh
 
-install: deps build overlay restart
+install: deps build overlay config restart
 
 sync:
 	@scripts/sync-upstream.sh
