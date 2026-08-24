@@ -72,7 +72,7 @@ fi
 
 if [[ $first_run -eq 1 ]]; then
     git -C "$CAELESTIA_USER_CONFIG" checkout --quiet -b main
-    for patch in "$REPO_ROOT"/patches/caelestia/0002-*.patch; do
+    for patch in "$REPO_ROOT"/patches/caelestia/*.patch; do
         [[ -e $patch ]] || continue
         apply_patch "$CAELESTIA_USER_CONFIG" "$patch"
     done
@@ -90,7 +90,7 @@ rsync -a "$REPO_ROOT/overlay/caelestia"/ "$CAELESTIA_USER_CONFIG"/
 if [[ -n $(git -C "$CAELESTIA_USER_CONFIG" status --porcelain) ]]; then
     git -C "$CAELESTIA_USER_CONFIG" add -A
     git -C "$CAELESTIA_USER_CONFIG" commit --quiet \
-        -m "overlay: host Tide Island inside the Caelestia shell root"
+        -m "overlay: apply caelestia-tide-island"
 fi
 
 log "done -- restart the shell with: caelestia shell -d"

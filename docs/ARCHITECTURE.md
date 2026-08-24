@@ -72,7 +72,7 @@ re-fork. `scripts/apply-overlay.sh` performs both sides of that.
 
 Two files, and one of them is generated.
 
-**`shell.qml`** — three lines, in `patches/caelestia/0002`:
+**`shell.qml`** — three lines, in `patches/caelestia/0001`:
 
 ```qml
 //@ pragma DefaultEnv QUICKSHELL_LYRICS_BACKEND=/usr/share/tide-island/bin/lyricsmpris
@@ -86,7 +86,7 @@ just before `ConfigToasts {}` so the island's layer surfaces stack above
 Caelestia's drawers.
 
 **`modules/island/TideIsland.qml`** — generated from Tide's own `shell.qml` by
-`patches/caelestia/0001`, a 13-line diff:
+`patches/tide-shell/0001`, a 13-line diff:
 
 ```qml
 import "file:/usr/share/tide-island" as Tide   // added
@@ -122,6 +122,31 @@ WARN quickshell.qmlscanner: Ignoring unresolvable import
 
 The scanner joins the path wrongly; the QML engine resolves it correctly and the
 island loads. The warning is harmless. It is the price of not vendoring.
+
+### Moving the dashboard out of the island's way
+
+`patches/caelestia/0002`. Caelestia's dashboard is anchored
+`horizontalCenter` + `top`, which is exactly where the island now lives — open
+the dashboard and it unrolls from behind the notch. The patch re-anchors it to
+`left` + `top`.
+
+Nothing else had to move. Both the pointer hit-testing in `Interactions.qml`
+(`withinPanelWidth` -> `bar.implicitWidth + panel.x`) and the input regions in
+`Regions.qml` (`x: panel.x + bar.implicitWidth`) are derived from `panel.x`, so
+the hover and drag zones follow the anchor on their own.
+
+The one addition is corner tolerance. `inBottomPanel` already took an
+`isCorner` flag that widens the trigger by `Config.border.rounding` — that is
+how the utilities panel is reachable in the bottom right corner. `inTopPanel`
+had no such flag, so it gained the mirror of it, and the dashboard hover test
+passes `true`:
+
+```qml
+function inTopPanel(panel: Item, x: real, y: real, isCorner = false): bool {
+    ...
+    return y < Math.max(...) + (isCorner ? Config.border.rounding : 0) && withinPanelWidth(panel, x, y);
+}
+```
 
 ## Theming
 

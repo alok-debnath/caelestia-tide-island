@@ -8,7 +8,7 @@
 #   1. checks out the requested revision
 #   2. re-applies patches/tide/*.patch, reporting exactly which one broke
 #   3. regenerates overlay/caelestia/modules/island/TideIsland.qml from the new
-#      upstream shell.qml via patches/caelestia/0001
+#      upstream shell.qml via patches/tide-shell/0001
 #   4. updates the pin in VERSIONS
 #
 # It deliberately does not build or install. Review the diff, then run
@@ -74,8 +74,8 @@ trap 'rm -rf "$work"' EXIT
 
 git -C "$TIDE_SRC" show "$rev:shell.qml" > "$work/shell.qml"
 git -C "$work" init --quiet
-git -C "$work" apply "$REPO_ROOT/patches/caelestia/0001-tide-shell-as-caelestia-module.patch" \
-    || die "patches/caelestia/0001 no longer applies to Tide's shell.qml -- rebase it, see docs/UPSTREAM-SYNC.md"
+git -C "$work" apply "$REPO_ROOT/patches/tide-shell/0001-tide-shell-as-caelestia-module.patch" \
+    || die "patches/tide-shell/0001 no longer applies to Tide's shell.qml -- rebase it, see docs/UPSTREAM-SYNC.md"
 
 install -Dm644 "$work/shell.qml" \
     "$REPO_ROOT/overlay/caelestia/modules/island/TideIsland.qml"

@@ -27,8 +27,9 @@ make restart
 commits it as `caelestia-shell <version>`, tags `upstream/<version>`, then
 merges that into `main`.
 
-The only file that can conflict is `shell.qml`, and only if upstream edited the
-same region the overlay touches. Resolve it like any merge:
+Three files can conflict, and only if upstream edited the same regions the
+overlay touches: `shell.qml`, `modules/drawers/Panels.qml`, and
+`modules/drawers/Interactions.qml`. Resolve like any merge:
 
 ```sh
 cd ~/.config/quickshell/caelestia
@@ -51,8 +52,14 @@ install matches:
 ```sh
 cd ~/.config/quickshell/caelestia
 git diff upstream:shell.qml main:shell.qml > \
-    ~/src/caelestia-tide-island/patches/caelestia/0002-host-tide-island-in-shell-root.patch
+    ~/src/caelestia-tide-island/patches/caelestia/0001-host-tide-island-in-shell-root.patch
 ```
+
+For the dashboard patch, what must survive is the `anchors.left` on the
+`Dashboard.Wrapper` in `Panels.qml`, and the `isCorner` parameter on
+`inTopPanel` in `Interactions.qml` together with the `true` the dashboard hover
+test passes to it. If upstream ever adds its own dashboard-position option,
+drop `patches/caelestia/0002` and use theirs instead.
 
 ### Rolling back a bad Caelestia update
 
@@ -103,7 +110,7 @@ What to preserve while resolving:
 
 Then `make build`, which runs `ctest`.
 
-### When `patches/caelestia/0001` stops applying
+### When `patches/tide-shell/0001` stops applying
 
 This is the 13-line diff that turns Tide's `shell.qml` into the overlay module.
 It only breaks if upstream reworks its own `shell.qml` imports or the
@@ -113,10 +120,10 @@ It only breaks if upstream reworks its own `shell.qml` imports or the
 cd .build/Tide-island
 git show HEAD:shell.qml > /tmp/shell.qml
 cd /tmp && git init -q && git apply --3way \
-    ~/src/caelestia-tide-island/patches/caelestia/0001-tide-shell-as-caelestia-module.patch
+    ~/src/caelestia-tide-island/patches/tide-shell/0001-tide-shell-as-caelestia-module.patch
 # fix it up, then:
 diff -u <(git -C ~/src/caelestia-tide-island/.build/Tide-island show HEAD:shell.qml) /tmp/shell.qml \
-    > ~/src/caelestia-tide-island/patches/caelestia/0001-tide-shell-as-caelestia-module.patch
+    > ~/src/caelestia-tide-island/patches/tide-shell/0001-tide-shell-as-caelestia-module.patch
 ```
 
 The two edits it must always make:

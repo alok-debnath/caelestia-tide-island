@@ -1,0 +1,45 @@
+diff --git a/modules/drawers/Interactions.qml b/modules/drawers/Interactions.qml
+index 3d94a52..3570c9c 100644
+--- a/modules/drawers/Interactions.qml
++++ b/modules/drawers/Interactions.qml
+@@ -41,9 +41,9 @@ CustomMouseArea {
+         return x > Math.min(width - Config.border.minThickness, bar.implicitWidth + panel.x) && withinPanelHeight(panel, x, y);
+     }
+ 
+-    function inTopPanel(panel: Item, x: real, y: real): bool {
++    function inTopPanel(panel: Item, x: real, y: real, isCorner = false): bool {
+         const panelHeight = panel.height * (1 - (panel.offsetScale ?? 0)); // qmllint disable missing-property
+-        return y < Math.max(Config.border.minThickness, Config.border.thickness + panelHeight) && withinPanelWidth(panel, x, y);
++        return y < Math.max(Config.border.minThickness, Config.border.thickness + panelHeight) + (isCorner ? Config.border.rounding : 0) && withinPanelWidth(panel, x, y);
+     }
+ 
+     function inBottomPanel(panel: Item, x: real, y: real, isCorner = false): bool {
+@@ -207,8 +207,9 @@ CustomMouseArea {
+                 screenState.launcher = false;
+         }
+ 
+-        // Show dashboard on hover
+-        const showDashboard = Config.dashboard.showOnHover && inTopPanel(panels.dashboard, x, y);
++        // Show dashboard on hover. Corner-tolerant like utilities is at the
++        // bottom right, since the dashboard now sits in the top left corner.
++        const showDashboard = Config.dashboard.showOnHover && inTopPanel(panels.dashboard, x, y, true);
+ 
+         // Always update visibility based on hover if not in shortcut mode
+         if (!dashboardShortcutActive) {
+diff --git a/modules/drawers/Panels.qml b/modules/drawers/Panels.qml
+index 28a0356..87f3b0a 100644
+--- a/modules/drawers/Panels.qml
++++ b/modules/drawers/Panels.qml
+@@ -112,7 +112,11 @@ Item {
+ 
+         screenState: root.screenState
+ 
+-        anchors.horizontalCenter: parent.horizontalCenter
++        // Left-anchored rather than centred: the Tide Island occupies the top
++        // centre, and a centred dashboard would open straight underneath it.
++        // Regions.qml and Interactions.qml both derive their hit areas from
++        // panel.x, so the hover and drag zones follow this anchor by themselves.
++        anchors.left: parent.left
+         anchors.top: parent.top
+     }
+ 

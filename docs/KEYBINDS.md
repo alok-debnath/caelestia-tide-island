@@ -16,7 +16,7 @@ config.
 | Notification history | sidebar | `tide toggleNotificationCenter` |
 | Volume / brightness OSD | drawer | notch |
 | App launcher | `SUPER` (tap) | `tide toggleApplicationLauncher` |
-| Control centre / quick settings | dashboard | `tide toggleControlCenter` |
+| Control centre / quick settings | dashboard (top left) | `tide toggleControlCenter` |
 | Wallpaper picker | `caelestia wallpaper` | `tide toggleWallpaperPicker` |
 | Workspace overview | drawer | `overview toggle` |
 | Media controls | `mpris` IPC + media keys | notch player, `tide togglePlayer` |
@@ -141,6 +141,14 @@ git commit -am "overlay: island owns notifications and OSD"
 
 Because the fork is a git repo, that edit survives the next
 `caelestia-shell` update as a merge, and `git revert` puts it back.
+
+## Dashboard moved to the top left
+
+Caelestia's dashboard is anchored to the top left corner rather than the top
+centre, because the island occupies the centre. Hover the top left corner (just
+right of the bar) to open it, exactly like the utilities panel in the bottom
+right. `patches/caelestia/0002` carries the change; the reasoning is in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Exclusive zone
 

@@ -163,9 +163,11 @@ Quickshell falls back to `/etc/xdg/quickshell/caelestia` immediately.
 ## Layout
 
 ```
-patches/tide/       patches against Tide Island (the theme bridge + its tests)
-patches/caelestia/  0001 generates the overlay module from Tide's shell.qml
-                    0002 mounts it in Caelestia's shell.qml
+patches/tide/       patches against Tide Island's C++ (the theme bridge + its tests)
+patches/tide-shell/ turns Tide's shell.qml into the overlay module (generator)
+patches/caelestia/  patches applied to the Caelestia config fork
+                    0001 mounts the island in shell.qml
+                    0002 moves the dashboard to the top left corner
 overlay/caelestia/  files copied verbatim into the config fork
 scripts/            build, overlay, sync, restart, uninstall
 docs/               architecture, theming, upstream sync, keybinds
