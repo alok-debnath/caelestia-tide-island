@@ -1,0 +1,645 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c9bd87d..93046e3 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -188,6 +188,27 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/lyricsmpris_runtime_tests.cpp")
+     set_tests_properties(lyricsmpris_runtime PROPERTIES TIMEOUT 20)
+ endif()
+ 
++if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/style_tokens_backend_tests.cpp")
++    add_executable(style_tokens_backend_tests
++        tests/style_tokens_backend_tests.cpp
++        backend/StyleTokensBackend.h
++        backend/StyleTokensBackend.cpp
++    )
++
++    target_include_directories(style_tokens_backend_tests PRIVATE
++        ${CMAKE_CURRENT_SOURCE_DIR}/backend
++    )
++
++    target_link_libraries(style_tokens_backend_tests PRIVATE
++        Qt6::Core
++        Qt6::Gui
++        Qt6::Qml
++        Qt6::Test
++    )
++
++    add_test(NAME style_tokens_backend COMMAND style_tokens_backend_tests)
++endif()
++
+ add_subdirectory(Tide-island-app)
+ 
+ # Main Backend Module (Combining all C++ components)
+diff --git a/backend/StyleTokensBackend.cpp b/backend/StyleTokensBackend.cpp
+index 99595aa..82675aa 100644
+--- a/backend/StyleTokensBackend.cpp
++++ b/backend/StyleTokensBackend.cpp
+@@ -1,5 +1,14 @@
+ #include "StyleTokensBackend.h"
+ 
++#include <QByteArray>
++#include <QDir>
++#include <QFile>
++#include <QFileInfo>
++#include <QFileSystemWatcher>
++#include <QJsonDocument>
++#include <QJsonObject>
++#include <QStandardPaths>
++#include <QTimer>
+ #include <Qt>
+ 
+ namespace {
+@@ -7,13 +16,39 @@ QColor hex(const char *value)
+ {
+     return QColor(QString::fromLatin1(value));
+ }
++
++// Caelestia stores colours as bare RRGGBB (no leading '#', no alpha).
++QColor schemeColour(const QString &value)
++{
++    if (value.isEmpty())
++        return QColor();
++
++    const QString normalised = value.startsWith(QLatin1Char('#')) ? value : QLatin1Char('#') + value;
++    const QColor colour(normalised);
++    return colour.isValid() ? colour : QColor();
+ }
+ 
+-#define STYLE_COLOR(name, value) \
++bool envDisabled()
++{
++    const QByteArray raw = qgetenv("TIDE_ISLAND_CAELESTIA_THEME");
++    return raw == "0" || raw == "false" || raw == "off";
++}
++
++// The scheme file is rewritten atomically (write + rename), which drops the
++// inotify watch on the old inode. Coalesce the resulting burst and re-arm.
++constexpr int kReloadDebounceMs = 60;
++}
++
++#define STYLE_COLOR(name, role, value) \
++    QColor StyleTokensBackend::name() const \
++    { \
++        return token(role, value); \
++    }
++
++#define STYLE_COLOR_ALPHA(name, role, value, alpha) \
+     QColor StyleTokensBackend::name() const \
+     { \
+-        static const QColor color = hex(value); \
+-        return color; \
++        return token(role, value, alpha); \
+     }
+ 
+ #define STYLE_GLOBAL_COLOR(name, value) \
+@@ -22,58 +57,175 @@ QColor hex(const char *value)
+         return value; \
+     }
+ 
++QString StyleTokensBackend::schemePath()
++{
++    const QByteArray override = qgetenv("TIDE_ISLAND_SCHEME_PATH");
++    if (!override.isEmpty())
++        return QString::fromLocal8Bit(override);
++
++    QString state = QString::fromLocal8Bit(qgetenv("XDG_STATE_HOME"));
++    if (state.isEmpty())
++        state = QDir::homePath() + QStringLiteral("/.local/state");
++
++    return state + QStringLiteral("/caelestia/scheme.json");
++}
++
+ StyleTokensBackend::StyleTokensBackend(QObject *parent)
+     : QObject(parent)
++    , m_path(schemePath())
++    , m_enabled(!envDisabled())
++{
++    if (!m_enabled)
++        return;
++
++    m_debounce = new QTimer(this);
++    m_debounce->setSingleShot(true);
++    m_debounce->setInterval(kReloadDebounceMs);
++    connect(m_debounce, &QTimer::timeout, this, [this] {
++        reload();
++        watchScheme();
++    });
++
++    m_watcher = new QFileSystemWatcher(this);
++    connect(m_watcher, &QFileSystemWatcher::fileChanged, m_debounce, qOverload<>(&QTimer::start));
++    connect(m_watcher, &QFileSystemWatcher::directoryChanged, m_debounce, qOverload<>(&QTimer::start));
++
++    reload();
++    watchScheme();
++}
++
++void StyleTokensBackend::reload()
++{
++    QHash<QString, QColor> colours;
++    QString mode;
++
++    QFile file(m_path);
++    if (file.open(QIODevice::ReadOnly)) {
++        const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
++        const QJsonObject root = doc.object();
++        mode = root.value(QStringLiteral("mode")).toString();
++
++        const QJsonObject palette = root.value(QStringLiteral("colours")).toObject();
++        for (auto it = palette.constBegin(); it != palette.constEnd(); ++it) {
++            const QColor colour = schemeColour(it.value().toString());
++            if (colour.isValid())
++                colours.insert(it.key(), colour);
++        }
++    }
++
++    if (colours == m_colours && mode == m_mode)
++        return;
++
++    m_colours = colours;
++    m_mode = mode;
++    Q_EMIT schemeChanged();
++}
++
++void StyleTokensBackend::watchScheme()
++{
++    if (!m_watcher)
++        return;
++
++    const QStringList watched = m_watcher->files() + m_watcher->directories();
++    if (!watched.isEmpty())
++        m_watcher->removePaths(watched);
++
++    // Watch the directory too: an atomic replace creates a new inode, and the
++    // file watch alone would go stale after the first wallpaper change.
++    const QString dir = QFileInfo(m_path).absolutePath();
++    if (QFileInfo::exists(dir))
++        m_watcher->addPath(dir);
++    if (QFileInfo::exists(m_path))
++        m_watcher->addPath(m_path);
++}
++
++QColor StyleTokensBackend::token(const char *role, const char *fallbackHex, int alpha) const
++{
++    QColor colour;
++
++    if (m_enabled && role) {
++        const auto it = m_colours.constFind(QString::fromLatin1(role));
++        if (it != m_colours.constEnd())
++            colour = it.value();
++    }
++
++    if (!colour.isValid())
++        colour = hex(fallbackHex);
++
++    if (alpha >= 0)
++        colour.setAlpha(alpha);
++
++    return colour;
++}
++
++bool StyleTokensBackend::schemeActive() const
+ {
++    return m_enabled && !m_colours.isEmpty();
++}
++
++QString StyleTokensBackend::schemeMode() const
++{
++    return schemeActive() ? m_mode : QString();
+ }
+ 
+ STYLE_GLOBAL_COLOR(transparent, Qt::transparent)
+ STYLE_GLOBAL_COLOR(black, Qt::black)
+ STYLE_GLOBAL_COLOR(white, Qt::white)
+ QColor StyleTokensBackend::clearBlack() const { return QColor(0, 0, 0, 0); }
+-STYLE_GLOBAL_COLOR(panel, Qt::black)
+-STYLE_COLOR(module, "#1c1c1e")
+-STYLE_COLOR(moduleHover, "#232326")
+-STYLE_COLOR(track, "#2c2c2e")
+-STYLE_COLOR(cardFillActive, "#26272b")
+-STYLE_COLOR(cardFillHover, "#222327")
+-STYLE_COLOR(connectivityCard, "#343437")
+-STYLE_COLOR(connectivityCardHover, "#3a3a3d")
+-STYLE_COLOR(prompt, "#323236")
+-STYLE_COLOR(input, "#212226")
+-STYLE_COLOR(inputBorder, "#3f4046")
+-STYLE_COLOR(secondaryButton, "#4a4b50")
+-STYLE_COLOR(textPrimary, "#f5f5f7")
+-STYLE_COLOR(textPrimaryBright, "#f7f8fb")
+-STYLE_COLOR(textSecondary, "#8e8e93")
+-STYLE_COLOR(textMuted, "#9b9da4")
+-STYLE_COLOR(textSoft, "#9da0a8")
+-STYLE_COLOR(textTertiary, "#7f828a")
+-STYLE_COLOR(textDisabled, "#878a92")
+-STYLE_COLOR(textSubtle, "#8f9198")
+-STYLE_COLOR(textDim, "#b5b7bf")
+-STYLE_COLOR(accent, "#0a84ff")
+-STYLE_COLOR(accentPressed, "#0066d6")
+-STYLE_COLOR(accentSoft, "#6ea8ff")
+-STYLE_COLOR(success, "#34c759")
+-STYLE_COLOR(warning, "#ffcc00")
+-STYLE_COLOR(danger, "#ff3b30")
+-STYLE_COLOR(error, "#ff7c72")
+-STYLE_COLOR(disabledControl, "#868991")
+-STYLE_COLOR(switchOff, "#63656c")
+-STYLE_COLOR(buttonFill, "#f5f5f7")
+-STYLE_GLOBAL_COLOR(buttonFillHover, Qt::white)
+-STYLE_COLOR(buttonFillPressed, "#e9e9ec")
+-STYLE_COLOR(overviewCard, "#ee17181b")
+-STYLE_COLOR(overviewBorder, "#33ffffff")
+-STYLE_COLOR(overviewInnerBorder, "#12ffffff")
+-STYLE_COLOR(workspaceCell, "#ff202226")
+-STYLE_COLOR(workspaceCellHover, "#ff2b2d34")
+-STYLE_COLOR(workspaceCellBorder, "#1effffff")
+-STYLE_COLOR(workspaceCellBorderHover, "#66d9f6ff")
+-STYLE_COLOR(workspaceOverlay, "#42070b10")
+-STYLE_COLOR(workspaceOverlayHover, "#280d131a")
+-STYLE_COLOR(workspaceActiveBorder, "#73d4ff")
++
++// Surfaces. The island body sits on the darkest container so it still reads as
++// a notch cut out of the screen rather than a floating card.
++STYLE_COLOR(panel, "surfaceContainerLowest", "#000000")
++STYLE_COLOR(module, "surfaceContainer", "#1c1c1e")
++STYLE_COLOR(moduleHover, "surfaceContainerHigh", "#232326")
++STYLE_COLOR(track, "surfaceContainerHighest", "#2c2c2e")
++STYLE_COLOR(cardFillActive, "surfaceContainerHigh", "#26272b")
++STYLE_COLOR(cardFillHover, "surfaceContainer", "#222327")
++STYLE_COLOR(connectivityCard, "surfaceVariant", "#343437")
++STYLE_COLOR(connectivityCardHover, "surfaceBright", "#3a3a3d")
++STYLE_COLOR(prompt, "surfaceContainerHigh", "#323236")
++STYLE_COLOR(input, "surfaceContainerLow", "#212226")
++STYLE_COLOR(inputBorder, "outlineVariant", "#3f4046")
++STYLE_COLOR(secondaryButton, "surfaceVariant", "#4a4b50")
++
++// Text. onSurface / onSurfaceVariant / outline is M3's own three-step
++// emphasis ramp, so it inverts correctly in light mode for free.
++STYLE_COLOR(textPrimary, "onSurface", "#f5f5f7")
++STYLE_COLOR(textPrimaryBright, "onBackground", "#f7f8fb")
++STYLE_COLOR(textSecondary, "onSurfaceVariant", "#8e8e93")
++STYLE_COLOR(textMuted, "onSurfaceVariant", "#9b9da4")
++STYLE_COLOR(textSoft, "onSurfaceVariant", "#9da0a8")
++STYLE_COLOR(textTertiary, "outline", "#7f828a")
++STYLE_COLOR(textDisabled, "outline", "#878a92")
++STYLE_COLOR(textSubtle, "outline", "#8f9198")
++STYLE_COLOR(textDim, "onSurfaceVariant", "#b5b7bf")
++
++STYLE_COLOR(accent, "primary", "#0a84ff")
++STYLE_COLOR(accentPressed, "primaryDim", "#0066d6")
++STYLE_COLOR(accentSoft, "onPrimaryContainer", "#6ea8ff")
++STYLE_COLOR(success, "success", "#34c759")
++STYLE_COLOR(warning, "yellow", "#ffcc00")
++STYLE_COLOR(danger, "error", "#ff3b30")
++STYLE_COLOR(error, "error", "#ff7c72")
++STYLE_COLOR(disabledControl, "outline", "#868991")
++STYLE_COLOR(switchOff, "surfaceContainerHighest", "#63656c")
++
++// Pill buttons are a high-contrast fill against the island body, so they take
++// the on-surface colour rather than a surface one.
++STYLE_COLOR(buttonFill, "onSurface", "#f5f5f7")
++STYLE_COLOR(buttonFillHover, "inverseSurface", "#ffffff")
++STYLE_COLOR(buttonFillPressed, "onSurfaceVariant", "#e9e9ec")
++
++STYLE_COLOR_ALPHA(overviewCard, "surfaceContainerLow", "#ee17181b", 0xee)
++STYLE_COLOR_ALPHA(overviewBorder, "outline", "#33ffffff", 0x33)
++STYLE_COLOR_ALPHA(overviewInnerBorder, "outline", "#12ffffff", 0x12)
++STYLE_COLOR_ALPHA(workspaceCell, "surfaceContainer", "#ff202226", 0xff)
++STYLE_COLOR_ALPHA(workspaceCellHover, "surfaceContainerHigh", "#ff2b2d34", 0xff)
++STYLE_COLOR_ALPHA(workspaceCellBorder, "outlineVariant", "#1effffff", 0x1e)
++STYLE_COLOR_ALPHA(workspaceCellBorderHover, "primary", "#66d9f6ff", 0x66)
++STYLE_COLOR_ALPHA(workspaceOverlay, "surfaceContainerLowest", "#42070b10", 0x42)
++STYLE_COLOR_ALPHA(workspaceOverlayHover, "surfaceContainerLowest", "#280d131a", 0x28)
++STYLE_COLOR(workspaceActiveBorder, "primary", "#73d4ff")
+ 
+ int StyleTokensBackend::radiusPanel() const { return 28; }
+ int StyleTokensBackend::radiusModule() const { return 24; }
+@@ -85,4 +237,5 @@ int StyleTokensBackend::durationQuick() const { return 140; }
+ int StyleTokensBackend::durationStandard() const { return 280; }
+ 
+ #undef STYLE_COLOR
++#undef STYLE_COLOR_ALPHA
+ #undef STYLE_GLOBAL_COLOR
+diff --git a/backend/StyleTokensBackend.h b/backend/StyleTokensBackend.h
+index c3cc9b9..918fe24 100644
+--- a/backend/StyleTokensBackend.h
++++ b/backend/StyleTokensBackend.h
+@@ -1,66 +1,91 @@
+ #pragma once
+ 
+ #include <QColor>
++#include <QHash>
+ #include <QObject>
++#include <QString>
+ #include <QtQml/qqml.h>
+ 
++class QFileSystemWatcher;
++class QTimer;
++
++// Style tokens for the island.
++//
++// Upstream Tide ships a fixed Apple-dark palette. This build additionally reads
++// the Material You scheme Caelestia derives from the current wallpaper
++// (~/.local/state/caelestia/scheme.json) and maps its M3 roles onto the token
++// set, so the island repaints together with the rest of the desktop.
++//
++// The scheme file is optional. When it is absent, unreadable, or explicitly
++// disabled via TIDE_ISLAND_CAELESTIA_THEME=0, every token falls back to the
++// upstream Apple-dark value, so this is a superset of upstream behaviour.
++//
++// Environment:
++//   TIDE_ISLAND_CAELESTIA_THEME=0   disable the bridge, use the stock palette
++//   TIDE_ISLAND_SCHEME_PATH=<path>  read the scheme from somewhere else
+ class StyleTokensBackend final : public QObject {
+     Q_OBJECT
+     QML_NAMED_ELEMENT(StyleTokens)
+     QML_SINGLETON
+ 
++    // Structural colours. Never themed.
+     Q_PROPERTY(QColor transparent READ transparent CONSTANT FINAL)
+     Q_PROPERTY(QColor black READ black CONSTANT FINAL)
+     Q_PROPERTY(QColor white READ white CONSTANT FINAL)
+     Q_PROPERTY(QColor clearBlack READ clearBlack CONSTANT FINAL)
+ 
+-    Q_PROPERTY(QColor panel READ panel CONSTANT FINAL)
+-    Q_PROPERTY(QColor module READ module CONSTANT FINAL)
+-    Q_PROPERTY(QColor moduleHover READ moduleHover CONSTANT FINAL)
+-    Q_PROPERTY(QColor track READ track CONSTANT FINAL)
+-    Q_PROPERTY(QColor cardFillActive READ cardFillActive CONSTANT FINAL)
+-    Q_PROPERTY(QColor cardFillHover READ cardFillHover CONSTANT FINAL)
+-    Q_PROPERTY(QColor connectivityCard READ connectivityCard CONSTANT FINAL)
+-    Q_PROPERTY(QColor connectivityCardHover READ connectivityCardHover CONSTANT FINAL)
+-    Q_PROPERTY(QColor prompt READ prompt CONSTANT FINAL)
+-    Q_PROPERTY(QColor input READ input CONSTANT FINAL)
+-    Q_PROPERTY(QColor inputBorder READ inputBorder CONSTANT FINAL)
+-    Q_PROPERTY(QColor secondaryButton READ secondaryButton CONSTANT FINAL)
+-
+-    Q_PROPERTY(QColor textPrimary READ textPrimary CONSTANT FINAL)
+-    Q_PROPERTY(QColor textPrimaryBright READ textPrimaryBright CONSTANT FINAL)
+-    Q_PROPERTY(QColor textSecondary READ textSecondary CONSTANT FINAL)
+-    Q_PROPERTY(QColor textMuted READ textMuted CONSTANT FINAL)
+-    Q_PROPERTY(QColor textSoft READ textSoft CONSTANT FINAL)
+-    Q_PROPERTY(QColor textTertiary READ textTertiary CONSTANT FINAL)
+-    Q_PROPERTY(QColor textDisabled READ textDisabled CONSTANT FINAL)
+-    Q_PROPERTY(QColor textSubtle READ textSubtle CONSTANT FINAL)
+-    Q_PROPERTY(QColor textDim READ textDim CONSTANT FINAL)
+-
+-    Q_PROPERTY(QColor accent READ accent CONSTANT FINAL)
+-    Q_PROPERTY(QColor accentPressed READ accentPressed CONSTANT FINAL)
+-    Q_PROPERTY(QColor accentSoft READ accentSoft CONSTANT FINAL)
+-    Q_PROPERTY(QColor success READ success CONSTANT FINAL)
+-    Q_PROPERTY(QColor warning READ warning CONSTANT FINAL)
+-    Q_PROPERTY(QColor danger READ danger CONSTANT FINAL)
+-    Q_PROPERTY(QColor error READ error CONSTANT FINAL)
+-    Q_PROPERTY(QColor disabledControl READ disabledControl CONSTANT FINAL)
+-    Q_PROPERTY(QColor switchOff READ switchOff CONSTANT FINAL)
+-
+-    Q_PROPERTY(QColor buttonFill READ buttonFill CONSTANT FINAL)
+-    Q_PROPERTY(QColor buttonFillHover READ buttonFillHover CONSTANT FINAL)
+-    Q_PROPERTY(QColor buttonFillPressed READ buttonFillPressed CONSTANT FINAL)
+-
+-    Q_PROPERTY(QColor overviewCard READ overviewCard CONSTANT FINAL)
+-    Q_PROPERTY(QColor overviewBorder READ overviewBorder CONSTANT FINAL)
+-    Q_PROPERTY(QColor overviewInnerBorder READ overviewInnerBorder CONSTANT FINAL)
+-    Q_PROPERTY(QColor workspaceCell READ workspaceCell CONSTANT FINAL)
+-    Q_PROPERTY(QColor workspaceCellHover READ workspaceCellHover CONSTANT FINAL)
+-    Q_PROPERTY(QColor workspaceCellBorder READ workspaceCellBorder CONSTANT FINAL)
+-    Q_PROPERTY(QColor workspaceCellBorderHover READ workspaceCellBorderHover CONSTANT FINAL)
+-    Q_PROPERTY(QColor workspaceOverlay READ workspaceOverlay CONSTANT FINAL)
+-    Q_PROPERTY(QColor workspaceOverlayHover READ workspaceOverlayHover CONSTANT FINAL)
+-    Q_PROPERTY(QColor workspaceActiveBorder READ workspaceActiveBorder CONSTANT FINAL)
++    // True when a Caelestia scheme is currently driving the tokens below.
++    Q_PROPERTY(bool schemeActive READ schemeActive NOTIFY schemeChanged FINAL)
++    // "dark" or "light", from the scheme. Empty when no scheme is loaded.
++    Q_PROPERTY(QString schemeMode READ schemeMode NOTIFY schemeChanged FINAL)
++
++    Q_PROPERTY(QColor panel READ panel NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor module READ module NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor moduleHover READ moduleHover NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor track READ track NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor cardFillActive READ cardFillActive NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor cardFillHover READ cardFillHover NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor connectivityCard READ connectivityCard NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor connectivityCardHover READ connectivityCardHover NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor prompt READ prompt NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor input READ input NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor inputBorder READ inputBorder NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor secondaryButton READ secondaryButton NOTIFY schemeChanged FINAL)
++
++    Q_PROPERTY(QColor textPrimary READ textPrimary NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor textPrimaryBright READ textPrimaryBright NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor textSecondary READ textSecondary NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor textMuted READ textMuted NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor textSoft READ textSoft NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor textTertiary READ textTertiary NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor textDisabled READ textDisabled NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor textSubtle READ textSubtle NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor textDim READ textDim NOTIFY schemeChanged FINAL)
++
++    Q_PROPERTY(QColor accent READ accent NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor accentPressed READ accentPressed NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor accentSoft READ accentSoft NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor success READ success NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor warning READ warning NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor danger READ danger NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor error READ error NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor disabledControl READ disabledControl NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor switchOff READ switchOff NOTIFY schemeChanged FINAL)
++
++    Q_PROPERTY(QColor buttonFill READ buttonFill NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor buttonFillHover READ buttonFillHover NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor buttonFillPressed READ buttonFillPressed NOTIFY schemeChanged FINAL)
++
++    Q_PROPERTY(QColor overviewCard READ overviewCard NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor overviewBorder READ overviewBorder NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor overviewInnerBorder READ overviewInnerBorder NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor workspaceCell READ workspaceCell NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor workspaceCellHover READ workspaceCellHover NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor workspaceCellBorder READ workspaceCellBorder NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor workspaceCellBorderHover READ workspaceCellBorderHover NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor workspaceOverlay READ workspaceOverlay NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor workspaceOverlayHover READ workspaceOverlayHover NOTIFY schemeChanged FINAL)
++    Q_PROPERTY(QColor workspaceActiveBorder READ workspaceActiveBorder NOTIFY schemeChanged FINAL)
+ 
+     Q_PROPERTY(int radiusPanel READ radiusPanel CONSTANT FINAL)
+     Q_PROPERTY(int radiusModule READ radiusModule CONSTANT FINAL)
+@@ -78,6 +103,10 @@ public:
+     QColor black() const;
+     QColor white() const;
+     QColor clearBlack() const;
++
++    bool schemeActive() const;
++    QString schemeMode() const;
++
+     QColor panel() const;
+     QColor module() const;
+     QColor moduleHover() const;
+@@ -130,4 +159,26 @@ public:
+     int durationControl() const;
+     int durationQuick() const;
+     int durationStandard() const;
++
++    // Path the bridge reads. Public so tests can assert the resolution order.
++    static QString schemePath();
++
++Q_SIGNALS:
++    void schemeChanged();
++
++private:
++    // Resolve one token: the M3 role from the loaded scheme when there is one,
++    // otherwise the upstream Apple-dark literal. `alpha` of -1 keeps the role's
++    // own alpha; anything else overrides it (0-255).
++    QColor token(const char *role, const char *fallbackHex, int alpha = -1) const;
++
++    void reload();
++    void watchScheme();
++
++    QHash<QString, QColor> m_colours;
++    QString m_mode;
++    QString m_path;
++    QFileSystemWatcher *m_watcher = nullptr;
++    QTimer *m_debounce = nullptr;
++    bool m_enabled = true;
+ };
+diff --git a/tests/style_tokens_backend_tests.cpp b/tests/style_tokens_backend_tests.cpp
+new file mode 100644
+index 0000000..e7a120f
+--- /dev/null
++++ b/tests/style_tokens_backend_tests.cpp
+@@ -0,0 +1,139 @@
++#include "StyleTokensBackend.h"
++
++#include <QColor>
++#include <QDir>
++#include <QFile>
++#include <QSignalSpy>
++#include <QTemporaryDir>
++#include <QTest>
++
++// Covers the Caelestia scheme bridge added on top of upstream Tide: fallback to
++// the stock palette, role mapping, live reload, and the kill switch.
++class StyleTokensBackendTests : public QObject {
++    Q_OBJECT
++
++private Q_SLOTS:
++    void init();
++    void cleanup();
++
++    void fallsBackToStockPaletteWithoutScheme();
++    void mapsSchemeRolesOntoTokens();
++    void keepsStockValueForRolesMissingFromScheme();
++    void appliesFixedAlphaToOverlayTokens();
++    void reloadsWhenSchemeChanges();
++    void envKillSwitchDisablesBridge();
++
++private:
++    void writeScheme(const QString &mode, const QString &colourPairs);
++
++    QTemporaryDir m_dir;
++    QString m_schemePath;
++};
++
++void StyleTokensBackendTests::init()
++{
++    QVERIFY(m_dir.isValid());
++    m_schemePath = m_dir.filePath(QStringLiteral("scheme.json"));
++    qputenv("TIDE_ISLAND_SCHEME_PATH", m_schemePath.toLocal8Bit());
++    qunsetenv("TIDE_ISLAND_CAELESTIA_THEME");
++}
++
++void StyleTokensBackendTests::cleanup()
++{
++    QFile::remove(m_schemePath);
++    qunsetenv("TIDE_ISLAND_SCHEME_PATH");
++    qunsetenv("TIDE_ISLAND_CAELESTIA_THEME");
++}
++
++void StyleTokensBackendTests::writeScheme(const QString &mode, const QString &colourPairs)
++{
++    QFile file(m_schemePath);
++    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
++    const QString json = QStringLiteral("{\"mode\": \"%1\", \"colours\": {%2}}").arg(mode, colourPairs);
++    QVERIFY(file.write(json.toUtf8()) > 0);
++    file.close();
++}
++
++void StyleTokensBackendTests::fallsBackToStockPaletteWithoutScheme()
++{
++    StyleTokensBackend tokens;
++
++    QVERIFY(!tokens.schemeActive());
++    QVERIFY(tokens.schemeMode().isEmpty());
++    QCOMPARE(tokens.module(), QColor(QStringLiteral("#1c1c1e")));
++    QCOMPARE(tokens.accent(), QColor(QStringLiteral("#0a84ff")));
++}
++
++void StyleTokensBackendTests::mapsSchemeRolesOntoTokens()
++{
++    // Caelestia writes colours as bare RRGGBB, without a leading '#'.
++    writeScheme(QStringLiteral("dark"),
++                QStringLiteral("\"surfaceContainer\": \"151a1e\", \"primary\": \"a7cbe7\", "
++                               "\"onSurface\": \"dfe6ee\", \"outline\": \"6f767d\""));
++
++    StyleTokensBackend tokens;
++
++    QVERIFY(tokens.schemeActive());
++    QCOMPARE(tokens.schemeMode(), QStringLiteral("dark"));
++    QCOMPARE(tokens.module(), QColor(QStringLiteral("#151a1e")));
++    QCOMPARE(tokens.accent(), QColor(QStringLiteral("#a7cbe7")));
++    QCOMPARE(tokens.textPrimary(), QColor(QStringLiteral("#dfe6ee")));
++    QCOMPARE(tokens.textTertiary(), QColor(QStringLiteral("#6f767d")));
++}
++
++void StyleTokensBackendTests::keepsStockValueForRolesMissingFromScheme()
++{
++    writeScheme(QStringLiteral("dark"), QStringLiteral("\"primary\": \"a7cbe7\""));
++
++    StyleTokensBackend tokens;
++
++    QCOMPARE(tokens.accent(), QColor(QStringLiteral("#a7cbe7")));
++    // No surfaceContainer role in this scheme, so the stock value stands.
++    QCOMPARE(tokens.module(), QColor(QStringLiteral("#1c1c1e")));
++}
++
++void StyleTokensBackendTests::appliesFixedAlphaToOverlayTokens()
++{
++    writeScheme(QStringLiteral("dark"),
++                QStringLiteral("\"primary\": \"a7cbe7\", \"surfaceContainerLowest\": \"000000\""));
++
++    StyleTokensBackend tokens;
++
++    const QColor borderHover = tokens.workspaceCellBorderHover();
++    QCOMPARE(borderHover.alpha(), 0x66);
++    QCOMPARE(borderHover.rgb(), QColor(QStringLiteral("#a7cbe7")).rgb());
++
++    QCOMPARE(tokens.workspaceOverlay().alpha(), 0x42);
++    // Opaque tokens must stay opaque.
++    QCOMPARE(tokens.workspaceCell().alpha(), 0xff);
++}
++
++void StyleTokensBackendTests::reloadsWhenSchemeChanges()
++{
++    writeScheme(QStringLiteral("dark"), QStringLiteral("\"primary\": \"a7cbe7\""));
++
++    StyleTokensBackend tokens;
++    QCOMPARE(tokens.accent(), QColor(QStringLiteral("#a7cbe7")));
++
++    QSignalSpy spy(&tokens, &StyleTokensBackend::schemeChanged);
++    writeScheme(QStringLiteral("light"), QStringLiteral("\"primary\": \"40637b\""));
++
++    QVERIFY(spy.wait(4000));
++    QCOMPARE(tokens.accent(), QColor(QStringLiteral("#40637b")));
++    QCOMPARE(tokens.schemeMode(), QStringLiteral("light"));
++}
++
++void StyleTokensBackendTests::envKillSwitchDisablesBridge()
++{
++    writeScheme(QStringLiteral("dark"), QStringLiteral("\"primary\": \"a7cbe7\""));
++    qputenv("TIDE_ISLAND_CAELESTIA_THEME", "0");
++
++    StyleTokensBackend tokens;
++
++    QVERIFY(!tokens.schemeActive());
++    QCOMPARE(tokens.accent(), QColor(QStringLiteral("#0a84ff")));
++}
++
++QTEST_MAIN(StyleTokensBackendTests)
++
++#include "style_tokens_backend_tests.moc"

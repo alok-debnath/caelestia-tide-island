@@ -1,0 +1,17 @@
+# Upstream revisions this integration is built and tested against.
+# Bump with scripts/sync-upstream.sh, never by hand alone -- the patches in
+# patches/ are only known to apply to these revisions.
+
+# https://github.com/enhaoswen/Tide-island
+TIDE_ISLAND_REPO=https://github.com/enhaoswen/Tide-island
+TIDE_ISLAND_REV=caf25b0cfe9009247527a5d37acf6b9b25572322
+
+# Caelestia shell ships as a distro package on Fedora; the config tree we layer
+# onto lives in /etc/xdg/quickshell/caelestia. This records the package version
+# the overlay patches were generated against.
+CAELESTIA_SHELL_VERSION=2.3.0
+
+# Install prefix Tide Island is installed to, and therefore the prefix the
+# overlay imports DynamicIslandWindow from. Changing this means regenerating
+# overlay/caelestia/modules/island/TideIsland.qml.
+TIDE_ISLAND_PREFIX=/usr

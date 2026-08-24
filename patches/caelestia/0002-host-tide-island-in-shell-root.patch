@@ -1,0 +1,26 @@
+--- a/shell.qml
++++ b/shell.qml
+@@ -3,12 +3,14 @@
+ //@ pragma DefaultEnv QS_DROP_EXPENSIVE_FONTS=1
+ //@ pragma DefaultEnv QSG_RENDER_LOOP=threaded
+ //@ pragma DefaultEnv QT_QUICK_FLICKABLE_WHEEL_DECELERATION=10000
++//@ pragma DefaultEnv QUICKSHELL_LYRICS_BACKEND=/usr/share/tide-island/bin/lyricsmpris
+ 
+ import "modules"
+ import "modules/drawers"
+ import "modules/background"
+ import "modules/areapicker"
+ import "modules/lock"
++import "modules/island"
+ import QtQuick
+ import Quickshell
+ import qs.services
+@@ -34,6 +36,8 @@
+         id: lock
+     }
+ 
++    TideIsland {}
++
+     ConfigToasts {}
+     Shortcuts {}
+     BatteryMonitor {}

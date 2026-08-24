@@ -1,0 +1,23 @@
+--- a/shell.qml
++++ b/shell.qml
+@@ -2,6 +2,11 @@
+ import Quickshell
+ import Quickshell.Io
+ import IslandBackend
++// DynamicIslandWindow and its qml/ subtree are loaded from the Tide Island
++// install prefix rather than vendored into this repo. Keeping the 126 KB
++// window out of the overlay is what makes upstream bumps a reinstall instead
++// of a merge. See docs/ARCHITECTURE.md.
++import "file:/usr/share/tide-island" as Tide
+ 
+ Scope {
+     id: shellRoot
+@@ -278,7 +283,7 @@
+ 
+         model: Quickshell.screens
+ 
+-        DynamicIslandWindow {
++        Tide.DynamicIslandWindow {
+             required property var modelData
+ 
+             screen: modelData
