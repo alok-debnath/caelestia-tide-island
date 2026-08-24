@@ -1,0 +1,125 @@
+diff --git a/modules/dashboard/Wrapper.qml b/modules/dashboard/Wrapper.qml
+index 0786e6b..d047601 100644
+--- a/modules/dashboard/Wrapper.qml
++++ b/modules/dashboard/Wrapper.qml
+@@ -29,7 +29,10 @@ Item {
+     property real offsetScale: shouldBeActive ? 0 : 1
+ 
+     visible: offsetScale < 1
+-    anchors.topMargin: (-implicitHeight - 5) * offsetScale
++    // Slides in from the left edge rather than down from the top, so the top
++    // of the screen is left to the island. Panels.qml anchors this left +
++    // verticalCenter to match.
++    anchors.leftMargin: (-implicitWidth - 5) * offsetScale
+     implicitHeight: content.implicitHeight
+     implicitWidth: content.implicitWidth || 854 // Hard coded fallback for first open
+     opacity: 1 - offsetScale
+@@ -41,8 +44,8 @@ Item {
+     Loader {
+         id: content
+ 
+-        anchors.horizontalCenter: parent.horizontalCenter
+-        anchors.bottom: parent.bottom
++        anchors.right: parent.right
++        anchors.top: parent.top
+ 
+         active: root.shouldBeActive || root.visible
+ 
+diff --git a/modules/drawers/Interactions.qml b/modules/drawers/Interactions.qml
+index 3d94a52..173a869 100644
+--- a/modules/drawers/Interactions.qml
++++ b/modules/drawers/Interactions.qml
+@@ -46,6 +46,18 @@ CustomMouseArea {
+         return y < Math.max(Config.border.minThickness, Config.border.thickness + panelHeight) && withinPanelWidth(panel, x, y);
+     }
+ 
++    // Left-edge drawer reached from the top left corner only, so the rest of
++    // the left edge stays inert. While the panel is open its whole body keeps
++    // it open, the same way the other hover panels behave.
++    function inLeftCorner(panel: Item, x: real, y: real): bool {
++        const panelWidth = panel.width * (1 - (panel.offsetScale ?? 0)); // qmllint disable missing-property
++        const withinEdge = x < bar.implicitWidth + Math.max(Config.border.minThickness, Config.border.thickness + panelWidth);
++        if (!withinEdge)
++            return false;
++        // Mirrors the sidebar's top right corner, which is bounded the same way.
++        return y < borderThickness + Config.sidebar.minHoverThreshold || (panelWidth > 0 && withinPanelHeight(panel, x, y));
++    }
++
+     function inBottomPanel(panel: Item, x: real, y: real, isCorner = false): bool {
+         const panelHeight = panel.height * (1 - (panel.offsetScale ?? 0)); // qmllint disable missing-property
+         return y > height - Math.max(Config.border.minThickness, Config.border.thickness + panelHeight) - (isCorner ? Config.border.rounding : 0) && withinPanelWidth(panel, x, y);
+@@ -207,8 +219,8 @@ CustomMouseArea {
+                 screenState.launcher = false;
+         }
+ 
+-        // Show dashboard on hover
+-        const showDashboard = Config.dashboard.showOnHover && inTopPanel(panels.dashboard, x, y);
++        // Show dashboard on hover from the top left corner
++        const showDashboard = Config.dashboard.showOnHover && inLeftCorner(panels.dashboard, x, y);
+ 
+         // Always update visibility based on hover if not in shortcut mode
+         if (!dashboardShortcutActive) {
+@@ -219,10 +231,10 @@ CustomMouseArea {
+         }
+ 
+         // Show/hide dashboard on drag (for touchscreen devices)
+-        if (pressed && inTopPanel(panels.dashboard, dragStart.x, dragStart.y) && withinPanelWidth(panels.dashboard, x, y)) {
+-            if (dragY > Config.dashboard.dragThreshold)
++        if (pressed && inLeftCorner(panels.dashboard, dragStart.x, dragStart.y) && withinPanelHeight(panels.dashboard, x, y)) {
++            if (dragX > Config.dashboard.dragThreshold)
+                 screenState.dashboard = true;
+-            else if (dragY < -Config.dashboard.dragThreshold)
++            else if (dragX < -Config.dashboard.dragThreshold)
+                 screenState.dashboard = false;
+         }
+ 
+@@ -256,7 +268,7 @@ CustomMouseArea {
+                 root.utilitiesShortcutActive = false;
+ 
+                 // Also hide dashboard and OSD if they're not being hovered
+-                const inDashboardArea = root.inTopPanel(root.panels.dashboard, root.mouseX, root.mouseY);
++                const inDashboardArea = root.inLeftCorner(root.panels.dashboard, root.mouseX, root.mouseY);
+                 const inOsdArea = root.inRightPanel(root.panels.osdWrapper, root.mouseX, root.mouseY);
+ 
+                 if (!inDashboardArea) {
+@@ -272,7 +284,7 @@ CustomMouseArea {
+         function onDashboardChanged() {
+             if (root.screenState.dashboard) {
+                 // Dashboard became visible, immediately check if this should be shortcut mode
+-                const inDashboardArea = root.inTopPanel(root.panels.dashboard, root.mouseX, root.mouseY);
++                const inDashboardArea = root.inLeftCorner(root.panels.dashboard, root.mouseX, root.mouseY);
+                 if (!inDashboardArea) {
+                     root.dashboardShortcutActive = true;
+                 }
+diff --git a/modules/drawers/Panels.qml b/modules/drawers/Panels.qml
+index 28a0356..97f9b37 100644
+--- a/modules/drawers/Panels.qml
++++ b/modules/drawers/Panels.qml
+@@ -112,7 +112,11 @@ Item {
+ 
+         screenState: root.screenState
+ 
+-        anchors.horizontalCenter: parent.horizontalCenter
++        // A left-edge drawer rather than a top one: the Tide Island owns the
++        // top centre, and keeping the dashboard off the top edge entirely
++        // leaves the top gestures free. Wrapper.qml slides it in horizontally
++        // to match, and it is reached from the top left corner.
++        anchors.left: parent.left
+         anchors.top: parent.top
+     }
+ 
+diff --git a/modules/drawers/Regions.qml b/modules/drawers/Regions.qml
+index 47ad068..3e851b9 100644
+--- a/modules/drawers/Regions.qml
++++ b/modules/drawers/Regions.qml
+@@ -23,8 +23,8 @@ Region {
+ 
+     R {
+         panel: root.panels.dashboard
+-        y: 0
+-        height: panel.height * (1 - root.panels.dashboard.offsetScale) + root.borderThickness
++        x: 0
++        width: panel.width * (1 - root.panels.dashboard.offsetScale) + root.bar.implicitWidth + root.borderThickness
+     }
+ 
+     R {

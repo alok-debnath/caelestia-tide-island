@@ -27,9 +27,10 @@ make restart
 commits it as `caelestia-shell <version>`, tags `upstream/<version>`, then
 merges that into `main`.
 
-Three files can conflict, and only if upstream edited the same regions the
-overlay touches: `shell.qml`, `modules/drawers/Panels.qml`, and
-`modules/drawers/Interactions.qml`. Resolve like any merge:
+Five files can conflict, and only if upstream edited the same regions the
+overlay touches: `shell.qml`, `modules/drawers/Panels.qml`,
+`modules/drawers/Interactions.qml`, `modules/drawers/Regions.qml`, and
+`modules/dashboard/Wrapper.qml`. Resolve like any merge:
 
 ```sh
 cd ~/.config/quickshell/caelestia
@@ -55,11 +56,17 @@ git diff upstream:shell.qml main:shell.qml > \
     ~/src/caelestia-tide-island/patches/caelestia/0001-host-tide-island-in-shell-root.patch
 ```
 
-For the dashboard patch, what must survive is the `anchors.left` on the
-`Dashboard.Wrapper` in `Panels.qml`, and the `isCorner` parameter on
-`inTopPanel` in `Interactions.qml` together with the `true` the dashboard hover
-test passes to it. If upstream ever adds its own dashboard-position option,
-drop `patches/caelestia/0002` and use theirs instead.
+For the dashboard patch, what must survive is:
+
+- `anchors.leftMargin` (not `topMargin`) in `modules/dashboard/Wrapper.qml`,
+  with its content anchored `right` + `top`
+- `anchors.left` + `anchors.top` on the `Dashboard.Wrapper` in `Panels.qml`
+- the left-strip input region in `Regions.qml`
+- `inLeftCorner` in `Interactions.qml`, used by all four dashboard hit tests,
+  and the horizontal (`dragX`) drag axis
+
+If upstream ever adds its own dashboard-position option, drop
+`patches/caelestia/0002` and use theirs instead.
 
 ### Rolling back a bad Caelestia update
 

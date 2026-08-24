@@ -167,7 +167,7 @@ patches/tide/       patches against Tide Island's C++ (the theme bridge + its te
 patches/tide-shell/ turns Tide's shell.qml into the overlay module (generator)
 patches/caelestia/  patches applied to the Caelestia config fork
                     0001 mounts the island in shell.qml
-                    0002 moves the dashboard to the top left corner
+                    0002 makes the dashboard a left-edge drawer
 overlay/caelestia/  files copied verbatim into the config fork
 scripts/            build, overlay, sync, restart, uninstall
 docs/               architecture, theming, upstream sync, keybinds

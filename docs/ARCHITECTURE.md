@@ -125,28 +125,46 @@ island loads. The warning is harmless. It is the price of not vendoring.
 
 ### Moving the dashboard out of the island's way
 
-`patches/caelestia/0002`. Caelestia's dashboard is anchored
-`horizontalCenter` + `top`, which is exactly where the island now lives — open
-the dashboard and it unrolls from behind the notch. The patch re-anchors it to
-`left` + `top`.
+`patches/caelestia/0002`. Caelestia's dashboard was a top drawer, anchored
+`horizontalCenter` + `top` and sliding down on `anchors.topMargin` — exactly
+where the island now lives, so opening it unrolled the panel from behind the
+notch. It is now a **left-edge drawer opened from the top left corner**, which
+leaves the whole top edge to the island.
 
-Nothing else had to move. Both the pointer hit-testing in `Interactions.qml`
-(`withinPanelWidth` -> `bar.implicitWidth + panel.x`) and the input regions in
-`Regions.qml` (`x: panel.x + bar.implicitWidth`) are derived from `panel.x`, so
-the hover and drag zones follow the anchor on their own.
+Four files, all in the config fork:
 
-The one addition is corner tolerance. `inBottomPanel` already took an
-`isCorner` flag that widens the trigger by `Config.border.rounding` — that is
-how the utilities panel is reachable in the bottom right corner. `inTopPanel`
-had no such flag, so it gained the mirror of it, and the dashboard hover test
-passes `true`:
+| File | Change |
+| --- | --- |
+| `modules/dashboard/Wrapper.qml` | slides on `anchors.leftMargin` instead of `topMargin`; content anchors `right` + `top` so it comes in horizontally from off-screen left |
+| `modules/drawers/Panels.qml` | anchors the wrapper `left` + `top` |
+| `modules/drawers/Regions.qml` | input region becomes a left strip instead of a top strip |
+| `modules/drawers/Interactions.qml` | adds `inLeftCorner`, and the dashboard drag axis becomes horizontal |
+
+The hit-testing is the only part with real logic in it. `inLeftCorner` is an
+edge test bounded to the corner:
 
 ```qml
-function inTopPanel(panel: Item, x: real, y: real, isCorner = false): bool {
-    ...
-    return y < Math.max(...) + (isCorner ? Config.border.rounding : 0) && withinPanelWidth(panel, x, y);
+function inLeftCorner(panel: Item, x: real, y: real): bool {
+    const panelWidth = panel.width * (1 - (panel.offsetScale ?? 0));
+    const withinEdge = x < bar.implicitWidth + Math.max(Config.border.minThickness, Config.border.thickness + panelWidth);
+    if (!withinEdge)
+        return false;
+    return y < borderThickness + Config.sidebar.minHoverThreshold || (panelWidth > 0 && withinPanelHeight(panel, x, y));
 }
 ```
+
+Two things worth noting:
+
+- The corner bound reuses `Config.sidebar.minHoverThreshold`, which is what
+  Caelestia already uses to bound the sidebar's **top right** corner. This is
+  its mirror image, so the two corners stay the same size if that setting is
+  changed.
+- The `panelWidth > 0 && withinPanelHeight(...)` arm is what keeps the panel
+  open once it is out. Without it the dashboard would close the moment the
+  pointer left the corner box, making the panel unusable.
+
+`panelWidth` folds in `offsetScale`, so a closed dashboard is reachable only
+from the corner while an open one is held by its whole body.
 
 ## Theming
 
